@@ -1,6 +1,9 @@
 name: Build Windows EXE
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -20,30 +23,79 @@ jobs:
         shell: powershell
         run: |
           $zip = Get-ChildItem -Recurse -Filter "Police-Duty-Rotation-Windows-Cloud-Build.zip" | Select-Object -First 1
+          if (-not $zip) { throw "ZIP file not found" }
           Expand-Archive $zip.FullName -DestinationPath extracted -Force
 
-      - name: Find project
+      - name: Find index.html
         shell: powershell
         run: |
-          $pkg = Get-ChildItem extracted -Recurse -Filter package.json | Select-Object -First 1
-          if (-not $pkg) { throw "package.json not found" }
-          "PROJECT_ROOT=$($pkg.Directory.FullName)" >> $env:GITHUB_ENV
+          $html = Get-ChildItem extracted -Recurse -Filter "index.html" | Select-Object -First 1
+          if (-not $html) { throw "index.html not found" }
+          New-Item -ItemType Directory -Force winapp | Out-Null
+          Copy-Item $html.FullName winapp\index.html
 
-      - name: Install
+      - name: Create Electron project
         shell: powershell
         run: |
-          Set-Location "$env:PROJECT_ROOT"
+          Set-Location winapp
+
+          @"
+          {
+            "name": "police-duty-rotation",
+            "version": "1.0.0",
+            "main": "main.js",
+            "scripts": {
+              "dist": "electron-builder --win"
+            },
+            "devDependencies": {
+              "electron": "^38.0.0",
+              "electron-builder": "^26.0.0"
+            },
+            "build": {
+              "appId": "com.police.duty.rotation",
+              "productName": "Police Duty Rotation",
+              "win": {
+                "target": "nsis"
+              }
+            }
+          }
+          "@ | Set-Content package.json
+
+          @"
+          const { app, BrowserWindow } = require('electron');
+
+          function createWindow() {
+            const win = new BrowserWindow({
+              width: 1400,
+              height: 900,
+              webPreferences: {
+                contextIsolation: true
+              }
+            });
+            win.loadFile('index.html');
+          }
+
+          app.whenReady().then(createWindow);
+
+          app.on('window-all-closed', () => {
+            if (process.platform !== 'darwin') app.quit();
+          });
+          "@ | Set-Content main.js
+
+      - name: Install dependencies
+        shell: powershell
+        run: |
+          Set-Location winapp
           npm install
 
-      - name: Build Windows EXE
+      - name: Build EXE
         shell: powershell
         run: |
-          Set-Location "$env:PROJECT_ROOT"
+          Set-Location winapp
           npm run dist
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
           name: Police-Duty-Rotation-Windows-EXE
-          path: |
-            extracted/**/dist/*.exe
+          path: winapp/dist/*.exe
