@@ -1,1 +1,49 @@
+name: Build Windows EXE
 
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Extract ZIP
+        shell: powershell
+        run: |
+          $zip = Get-ChildItem -Recurse -Filter "Police-Duty-Rotation-Windows-Cloud-Build.zip" | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath extracted -Force
+
+      - name: Find project
+        shell: powershell
+        run: |
+          $pkg = Get-ChildItem extracted -Recurse -Filter package.json | Select-Object -First 1
+          if (-not $pkg) { throw "package.json not found" }
+          "PROJECT_ROOT=$($pkg.Directory.FullName)" >> $env:GITHUB_ENV
+
+      - name: Install
+        shell: powershell
+        run: |
+          Set-Location "$env:PROJECT_ROOT"
+          npm install
+
+      - name: Build Windows EXE
+        shell: powershell
+        run: |
+          Set-Location "$env:PROJECT_ROOT"
+          npm run dist
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Police-Duty-Rotation-Windows-EXE
+          path: |
+            extracted/**/dist/*.exe
