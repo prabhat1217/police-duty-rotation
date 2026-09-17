@@ -1,57 +1,133 @@
-            name: Build APK
+name: Build Windows EXE
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Find Android project
-        run: |
-          set -e
-
-          echo "Searching for Android project..."
-
-          if find . -type f -name "gradlew" | grep -q .; then
-            PROJECT_DIR=$(dirname "$(find . -type f -name "gradlew" | head -1)")
-          else
-            PROJECT_DIR=$(find . -type f -name "settings.gradle" -o -name "settings.gradle.kts" | head -1 | xargs -r dirname)
-          fi
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "Android project not found."
-            find . -maxdepth 4 -type f | head -200
-            exit 1
-          fi
-
-          echo "Android project: $PROJECT_DIR"
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          distribution: temurin
-          java-version: "17"
+          node-version: "22"
 
-      - name: Build APK
-        working-directory: ${{ env.PROJECT_DIR }}
+      - name: Find Windows project ZIP
+        shell: powershell
         run: |
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew assembleDebug --no-daemon
-          else
-            echo "gradlew not found."
-            exit 1
-          fi
+          $zip = Get-ChildItem -Recurse -Filter "Police-Duty-Rotation-Windows-Cloud-Build.zip" | Select-Object -First 1
+          if (-not $zip) {
+            throw "Windows project ZIP not found"
+          }
+          Write-Host "Found: $($zip.FullName)"
+          Expand-Archive -Path $zip.FullName -DestinationPath extracted -Force
 
-      - name: Upload APK
+      - name: Find index.html
+        shell: powershell
+        run: |
+          $html = Get-ChildItem extracted -Recurse -Filter "index.html" | Select-Object -First 1
+          if (-not $html) {
+            throw "index.html not found"
+          }
+
+          New-Item -ItemType Directory -Force winapp | Out-Null
+          Copy-Item "$($html.Directory.FullName)\*" "winapp\" -Recurse -Force
+
+      - name: Copy logo
+        shell: powershell
+        run: |
+          if (Test-Path "logo.png") {
+            Copy-Item "logo.png" "winapp\logo.png" -Force
+          }
+
+      - name: Create package.json
+        shell: powershell
+        run: |
+          Set-Location winapp
+
+          $json = @'
+{
+  "name": "police-duty-rotation",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "dist": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.police.duty.rotation",
+    "productName": "Protocol Police Duty",
+    "win": {
+      "target": "nsis",
+      "icon": "logo.png"
+    }
+  }
+}
+'@
+
+          [System.IO.File]::WriteAllText(
+            "package.json",
+            $json,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+      - name: Create main.js
+        shell: powershell
+        run: |
+          Set-Location winapp
+
+          $js = @'
+const { app, BrowserWindow } = require("electron");
+
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    webPreferences: {
+      contextIsolation: true
+    }
+  });
+
+  win.loadFile("index.html");
+}
+
+app.whenReady().then(createWindow);
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
+'@
+
+          [System.IO.File]::WriteAllText(
+            "main.js",
+            $js,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+      - name: Install dependencies
+        shell: powershell
+        run: |
+          Set-Location winapp
+          npm install
+
+      - name: Build EXE
+        shell: powershell
+        run: |
+          Set-Location winapp
+          npm run dist
+
+      - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
-          name: Protocol-Police-Duty-APK
-          path: "${{ env.PROJECT_DIR }}/**/build/outputs/apk/debug/*.apk"
+          name: Protocol-Police-Duty-Windows-EXE
+          path: winapp/dist/*.exe
           if-no-files-found: error
