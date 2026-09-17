@@ -1,0 +1,102 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Extract project
+        shell: powershell
+        run: |
+          $zip = Get-ChildItem -Recurse -Filter "Police-Duty-Rotation-Windows-Cloud-Build.zip" | Select-Object -First 1
+          if (-not $zip) { throw "ZIP not found" }
+          Expand-Archive -Path $zip.FullName -DestinationPath extracted -Force
+
+      - name: Find application
+        shell: powershell
+        run: |
+          $html = Get-ChildItem extracted -Recurse -Filter "index.html" | Select-Object -First 1
+          if (-not $html) { throw "index.html not found" }
+          New-Item -ItemType Directory -Force winapp
+          Copy-Item "$($html.Directory.FullName)\*" "winapp" -Recurse -Force
+
+      - name: Copy icon
+        shell: powershell
+        run: |
+          if (Test-Path "logo.png") {
+            Copy-Item "logo.png" "winapp\logo.png" -Force
+          }
+
+      - name: Create package
+        shell: powershell
+        run: |
+          Set-Location winapp
+          @"
+          {
+            "name": "police-duty-rotation",
+            "version": "1.0.0",
+            "main": "main.js",
+            "scripts": {
+              "dist": "electron-builder --win"
+            },
+            "devDependencies": {
+              "electron": "38.0.0",
+              "electron-builder": "26.0.0"
+            },
+            "build": {
+              "appId": "com.police.duty.rotation",
+              "productName": "Protocol Police Duty",
+              "win": {
+                "target": "nsis",
+                "icon": "logo.png"
+              }
+            }
+          }
+          "@ | Set-Content package.json -Encoding utf8
+
+          @"
+          const { app, BrowserWindow } = require("electron");
+
+          function createWindow() {
+            const win = new BrowserWindow({
+              width: 1400,
+              height: 900
+            });
+            win.loadFile("index.html");
+          }
+
+          app.whenReady().then(createWindow);
+
+          app.on("window-all-closed", () => {
+            if (process.platform !== "darwin") app.quit();
+          });
+          "@ | Set-Content main.js -Encoding utf8
+
+      - name: Install
+        shell: powershell
+        run: |
+          Set-Location winapp
+          npm install
+
+      - name: Build EXE
+        shell: powershell
+        run: |
+          Set-Location winapp
+          npm run dist
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Protocol-Police-Duty-Windows-EXE
+          path: winapp/dist/*.exe
