@@ -1,0 +1,62 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Find project ZIP
+        run: |
+          ZIP=$(find . -maxdepth 3 -type f -name "*.zip" | head -1)
+          if [ -z "$ZIP" ]; then
+            echo "ZIP file not found"
+            exit 1
+          fi
+          echo "Using ZIP: $ZIP"
+          unzip -o "$ZIP" -d extracted
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Find Android project
+        run: |
+          GRADLE_FILE=$(find extracted -type f \( -name "build.gradle" -o -name "build.gradle.kts" \) | head -1)
+
+          if [ -z "$GRADLE_FILE" ]; then
+            echo "Android Gradle project not found"
+            find extracted -maxdepth 5 -type f | head -100
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$GRADLE_FILE")
+          echo "Project directory: $PROJECT_DIR"
+
+          cd "$PROJECT_DIR"
+
+          if [ -f "gradlew" ]; then
+            chmod +x gradlew
+            ./gradlew assembleDebug --no-daemon
+          else
+            gradle assembleDebug --no-daemon
+          fi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Protocol-Police-Duty-APK
+          path: "extracted/**/build/outputs/apk/debug/*.apk"
+          if-no-files-found: error
