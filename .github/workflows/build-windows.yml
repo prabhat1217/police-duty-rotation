@@ -1,4 +1,4 @@
-name: Build Windows EXE
+            name: Build Windows EXE
 
 on:
   push:
@@ -17,12 +17,13 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Extract ZIP
         shell: powershell
         run: |
           $zip = Get-ChildItem -Recurse -Filter "Police-Duty-Rotation-Windows-Cloud-Build.zip" | Select-Object -First 1
+
           if (-not $zip) {
             throw "ZIP file not found"
           }
@@ -58,7 +59,7 @@ jobs:
         run: |
           Set-Location winapp
 
-          @"
+          $package = @'
           {
             "name": "police-duty-rotation",
             "version": "1.0.0",
@@ -68,8 +69,8 @@ jobs:
               "dist": "electron-builder --win"
             },
             "devDependencies": {
-              "electron": "^38.0.0",
-              "electron-builder": "^26.0.0"
+              "electron": "^38.8.6",
+              "electron-builder": "^26.15.3"
             },
             "build": {
               "appId": "com.police.duty.rotation",
@@ -83,9 +84,15 @@ jobs:
               }
             }
           }
-          "@ | Set-Content package.json -Encoding UTF8
+          '@
 
-          @"
+          [System.IO.File]::WriteAllText(
+            "package.json",
+            $package,
+            (New-Object System.Text.UTF8Encoding($false))
+          )
+
+          $main = @'
           const { app, BrowserWindow } = require('electron');
 
           function createWindow() {
@@ -118,7 +125,13 @@ jobs:
               app.quit();
             }
           });
-          "@ | Set-Content main.js -Encoding UTF8
+          '@
+
+          [System.IO.File]::WriteAllText(
+            "main.js",
+            $main,
+            (New-Object System.Text.UTF8Encoding($false))
+          )
 
       - name: Install dependencies
         shell: powershell
